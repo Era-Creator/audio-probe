@@ -3,119 +3,157 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Проба захвата звука</title>
+<title>Передатчик звука в Shemu</title>
 <style>
   :root { color-scheme: light dark; }
   body { font: 16px/1.5 system-ui, sans-serif; max-width: 760px; margin: 0 auto; padding: 24px; }
   h1 { font-size: 20px; }
   .card { border: 1px solid #8884; border-radius: 10px; padding: 16px; margin: 16px 0; }
-  button { font: inherit; padding: 10px 16px; border-radius: 8px; border: 1px solid #8886; cursor: pointer; }
-  .meter { height: 18px; border-radius: 9px; background: #8882; overflow: hidden; margin-top: 10px; }
+  label { display: block; font-size: 14px; margin: 8px 0 2px; }
+  input { font: inherit; width: 100%; box-sizing: border-box; padding: 8px; border-radius: 8px; border: 1px solid #8886; }
+  button { font: inherit; padding: 10px 18px; border-radius: 8px; border: 1px solid #8886; cursor: pointer; margin-top: 12px; }
+  button:disabled { opacity: .5; cursor: default; }
+  .meter { height: 14px; border-radius: 7px; background: #8882; overflow: hidden; margin-top: 6px; }
   .meter > i { display: block; height: 100%; width: 0%; background: #2a8; transition: width .06s linear; }
+  .row { display: flex; gap: 16px; }
+  .row > div { flex: 1; }
   .verdict { font-weight: 600; margin-top: 10px; }
-  .ok { color: #1a8f4a; }
-  .bad { color: #c23; }
+  .ok { color: #1a8f4a; } .bad { color: #c23; }
   .hint { color: #8889; font-size: 14px; }
-  code { background: #8882; padding: 1px 5px; border-radius: 4px; }
-  ol { padding-left: 20px; }
+  #log { white-space: pre-wrap; font: 13px/1.4 ui-monospace, monospace; background: #8881; padding: 10px; border-radius: 8px; max-height: 200px; overflow: auto; margin-top: 10px; }
 </style>
 </head>
 <body>
-<h1>Проба захвата звука в браузере</h1>
+<h1>Передатчик звука в Shemu</h1>
 <p class="hint">
-  Эта страница только проверяет, разрешает ли браузер на этом компьютере захват звука.
-  Она <b>ничего не записывает, не сохраняет и никуда не передаёт</b> — весь звук остаётся в этой вкладке
-  и исчезает, как только вы её закроете. Индикатор просто показывает глазами, что звук «ловится».
+  Ловит ваш микрофон и системный звук (голос собеседника) в Chrome и передаёт их на Mac по защищённому адресу.
+  На этом ноутбуке <b>ничего не сохраняется</b> — звук уходит потоком и в памяти вкладки держится лишь доля секунды.
+  Работает только в <b>Chrome</b> (у Firefox нет передачи системного звука).
 </p>
 
 <div class="card">
-  <b>1. Системный звук (голос собеседника)</b>
-  <ol class="hint">
-    <li>Нажмите кнопку ниже.</li>
-    <li>В окне выбора возьмите <b>«Весь экран»</b> и включите галочку
-      <b>«Также передавать системный звук»</b> (внизу окна).</li>
-  </ol>
-  <button id="sysBtn">Проверить системный звук</button>
-  <div class="meter"><i id="sysBar"></i></div>
-  <div class="verdict" id="sysOut">—</div>
+  <label>Адрес приёма (его даст Mac — вида https://…trycloudflare.com)</label>
+  <input id="url" placeholder="https://xxxx.trycloudflare.com" autocomplete="off">
+  <label>Ключ</label>
+  <input id="token" placeholder="ключ с Mac" autocomplete="off">
+  <label>Название встречи (необязательно)</label>
+  <input id="title" placeholder="например: созвон с поставщиком" autocomplete="off">
 </div>
 
 <div class="card">
-  <b>2. Микрофон (ваш голос)</b>
-  <p class="hint">Просто разрешите доступ к микрофону, когда браузер спросит, и говорите.</p>
-  <button id="micBtn">Проверить микрофон</button>
-  <div class="meter"><i id="micBar"></i></div>
-  <div class="verdict" id="micOut">—</div>
+  <button id="startBtn">Начать запись</button>
+  <button id="stopBtn" disabled>Остановить и отправить</button>
+  <div class="verdict" id="out">Готов.</div>
+  <div class="row" style="margin-top:12px">
+    <div><div class="hint">Ваш микрофон</div><div class="meter"><i id="micBar"></i></div></div>
+    <div><div class="hint">Системный звук (собеседник)</div><div class="meter"><i id="sysBar"></i></div></div>
+  </div>
+  <div id="log"></div>
 </div>
 
 <p class="hint" id="ctx"></p>
 
 <script>
-function levelLoop(track, bar) {
-  const ctx = new (window.AudioContext || window.webkitAudioContext)();
-  const src = ctx.createMediaStreamSource(new MediaStream([track]));
-  const an = ctx.createAnalyser();
-  an.fftSize = 512;
-  src.connect(an);
+const $ = id => document.getElementById(id);
+for (const k of ["url", "token", "title"]) {
+  $(k).value = localStorage.getItem("tx_" + k) || "";
+  $(k).addEventListener("change", () => localStorage.setItem("tx_" + k, $(k).value.trim()));
+}
+const log = m => { const l = $("log"); l.textContent += m + "\n"; l.scrollTop = l.scrollHeight; };
+
+const SR = 16000, CHUNK_MS = 1000;
+let running = false, session = null, pumps = [];
+
+function meter(track, bar) {
+  const ctx = new AudioContext();
+  const an = ctx.createAnalyser(); an.fftSize = 512;
+  ctx.createMediaStreamSource(new MediaStream([track])).connect(an);
   const buf = new Uint8Array(an.fftSize);
   (function tick() {
     an.getByteTimeDomainData(buf);
-    let peak = 0;
-    for (const v of buf) peak = Math.max(peak, Math.abs(v - 128));
-    bar.style.width = Math.min(100, Math.round((peak / 128) * 140)) + "%";
-    if (track.readyState === "live") requestAnimationFrame(tick);
+    let p = 0; for (const v of buf) p = Math.max(p, Math.abs(v - 128));
+    bar.style.width = Math.min(100, Math.round(p / 128 * 140)) + "%";
+    if (track.readyState === "live" && running) requestAnimationFrame(tick); else bar.style.width = "0%";
   })();
 }
 
-function noApi(out) {
-  out.className = "verdict bad";
-  out.textContent = "НЕТ: браузер не дал доступ к API захвата (navigator.mediaDevices отсутствует). " +
-    "Обычно это небезопасный контекст (нужен https) или блокировка политикой.";
+// One PCM pump: resamples a track to 16 kHz mono Int16 and POSTs ~1 s chunks.
+function startPump(stream, track, label) {
+  const ctx = new AudioContext({ sampleRate: SR });
+  const src = ctx.createMediaStreamSource(stream);
+  const node = ctx.createScriptProcessor(4096, 1, 1);
+  const sink = ctx.createGain(); sink.gain.value = 0;       // no audible playback
+  src.connect(node); node.connect(sink); sink.connect(ctx.destination);
+  let acc = [], accLen = 0, seq = 0;
+  const need = Math.round(SR * CHUNK_MS / 1000);
+  node.onaudioprocess = e => {
+    if (!running) return;
+    const f = e.inputBuffer.getChannelData(0);
+    const i16 = new Int16Array(f.length);
+    for (let i = 0; i < f.length; i++) { let s = Math.max(-1, Math.min(1, f[i])); i16[i] = s < 0 ? s * 32768 : s * 32767; }
+    acc.push(i16); accLen += i16.length;
+    while (accLen >= need) {
+      const out = new Int16Array(need); let o = 0;
+      while (o < need) { const h = acc[0]; const take = Math.min(h.length, need - o); out.set(h.subarray(0, take), o); o += take; if (take === h.length) acc.shift(); else acc[0] = h.subarray(take); }
+      accLen -= need;
+      send(label, seq++, out.buffer);
+    }
+  };
+  return { ctx, track, label };
 }
 
-document.getElementById("sysBtn").onclick = async () => {
-  const out = document.getElementById("sysOut");
-  const bar = document.getElementById("sysBar");
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) return noApi(out);
-  out.className = "verdict"; out.textContent = "Открываю выбор экрана…";
+let q = Promise.resolve();
+function send(track, seq, buf) {
+  q = q.then(async () => {
+    try {
+      const r = await fetch(`${base()}/chunk?session=${session}&track=${track}&seq=${seq}`, {
+        method: "POST", headers: { "Authorization": "Bearer " + $("token").value.trim(), "Content-Type": "application/octet-stream" }, body: buf
+      });
+      if (!r.ok) log(`✗ ${track} #${seq}: HTTP ${r.status}`);
+      else if (seq % 10 === 0) log(`✓ ${track}: отправлено ${seq + 1} с`);
+    } catch (e) { log(`✗ ${track} #${seq}: ${e.message}`); }
+  });
+}
+const base = () => $("url").value.trim().replace(/\/+$/, "");
+
+$("startBtn").onclick = async () => {
+  const out = $("out");
+  if (!base() || !$("token").value.trim()) { out.className = "verdict bad"; out.textContent = "Заполните адрес и ключ."; return; }
+  if (!navigator.mediaDevices?.getDisplayMedia) { out.className = "verdict bad"; out.textContent = "Нет API захвата (нужен https / Chrome)."; return; }
   try {
-    const s = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-    const a = s.getAudioTracks();
-    s.getVideoTracks().forEach(t => t.stop()); // картинка не нужна
-    if (!a.length) {
-      out.className = "verdict bad";
-      out.textContent = "ЧАСТИЧНО: экран захватился, но звука нет — вы не включили «Также передавать системный звук». Повторите и поставьте галочку.";
-      return;
-    }
-    out.className = "verdict ok";
-    out.textContent = "ДА: системный звук захватывается. Полоска ниже должна двигаться под звук собеседника.";
-    levelLoop(a[0], bar);
-  } catch (e) {
-    out.className = "verdict bad";
-    out.textContent = "НЕТ: " + e.name + " — " + e.message +
-      (e.name === "NotAllowedError" ? " (отказ пользователя или блокировка политикой)" : "");
-  }
+    const mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false } });
+    out.textContent = "Выберите «Весь экран» и включите «Также передавать системный звук»…";
+    const disp = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+    disp.getVideoTracks().forEach(t => t.stop());
+    const sysTracks = disp.getAudioTracks();
+    if (!sysTracks.length) { out.className = "verdict bad"; out.textContent = "Системный звук не передан — не стояла галочка. Нажмите «Начать» заново."; mic.getTracks().forEach(t => t.stop()); return; }
+    session = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    running = true;
+    pumps = [startPump(mic, mic.getAudioTracks()[0], "mic"), startPump(new MediaStream([sysTracks[0]]), sysTracks[0], "sys")];
+    meter(mic.getAudioTracks()[0], $("micBar")); meter(sysTracks[0], $("sysBar"));
+    sysTracks[0].onended = () => { if (running) stop(); };   // остановка «Прекратить доступ»
+    out.className = "verdict ok"; out.textContent = "Идёт запись и передача. Говорите.";
+    log("сессия " + session + " начата");
+    $("startBtn").disabled = true; $("stopBtn").disabled = false;
+  } catch (e) { out.className = "verdict bad"; out.textContent = "Ошибка: " + e.name + " — " + e.message; }
 };
 
-document.getElementById("micBtn").onclick = async () => {
-  const out = document.getElementById("micOut");
-  const bar = document.getElementById("micBar");
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return noApi(out);
-  out.className = "verdict"; out.textContent = "Запрашиваю микрофон…";
+async function stop() {
+  running = false;
+  $("stopBtn").disabled = true;
+  for (const p of pumps) { try { p.track.stop(); p.ctx.close(); } catch {} }
+  await q;
+  const meta = { startedUtc: new Date().toISOString(), utcOffsetMin: -new Date().getTimezoneOffset(), title: $("title").value.trim() };
   try {
-    const s = await navigator.mediaDevices.getUserMedia({ audio: true });
-    out.className = "verdict ok";
-    out.textContent = "ДА: микрофон доступен. Говорите — полоска должна двигаться.";
-    levelLoop(s.getAudioTracks()[0], bar);
-  } catch (e) {
-    out.className = "verdict bad";
-    out.textContent = "НЕТ: " + e.name + " — " + e.message;
-  }
-};
+    await fetch(`${base()}/finish?session=${session}`, { method: "POST", headers: { "Authorization": "Bearer " + $("token").value.trim(), "Content-Type": "application/json" }, body: JSON.stringify(meta) });
+    $("out").className = "verdict ok"; $("out").textContent = "Отправлено. Встреча появится в Shemu на Mac.";
+    log("сессия завершена");
+  } catch (e) { $("out").className = "verdict bad"; $("out").textContent = "Финал не доставлен: " + e.message; }
+  $("startBtn").disabled = false;
+}
+$("stopBtn").onclick = stop;
 
-document.getElementById("ctx").textContent =
-  "Контекст страницы: " + location.origin +
-  " · защищённый контекст: " + (window.isSecureContext ? "да" : "НЕТ (захват будет заблокирован)");
+$("ctx").textContent = "Контекст: " + location.origin + " · защищённый: " + (window.isSecureContext ? "да" : "НЕТ");
 </script>
 </body>
 </html>
