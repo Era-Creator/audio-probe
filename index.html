@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Проба захвата звука</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 16px/1.5 system-ui, sans-serif; max-width: 760px; margin: 0 auto; padding: 24px; }
+  h1 { font-size: 20px; }
+  .card { border: 1px solid #8884; border-radius: 10px; padding: 16px; margin: 16px 0; }
+  button { font: inherit; padding: 10px 16px; border-radius: 8px; border: 1px solid #8886; cursor: pointer; }
+  .meter { height: 18px; border-radius: 9px; background: #8882; overflow: hidden; margin-top: 10px; }
+  .meter > i { display: block; height: 100%; width: 0%; background: #2a8; transition: width .06s linear; }
+  .verdict { font-weight: 600; margin-top: 10px; }
+  .ok { color: #1a8f4a; }
+  .bad { color: #c23; }
+  .hint { color: #8889; font-size: 14px; }
+  code { background: #8882; padding: 1px 5px; border-radius: 4px; }
+  ol { padding-left: 20px; }
+</style>
+</head>
+<body>
+<h1>Проба захвата звука в браузере</h1>
+<p class="hint">
+  Эта страница только проверяет, разрешает ли браузер на этом компьютере захват звука.
+  Она <b>ничего не записывает, не сохраняет и никуда не передаёт</b> — весь звук остаётся в этой вкладке
+  и исчезает, как только вы её закроете. Индикатор просто показывает глазами, что звук «ловится».
+</p>
+
+<div class="card">
+  <b>1. Системный звук (голос собеседника)</b>
+  <ol class="hint">
+    <li>Нажмите кнопку ниже.</li>
+    <li>В окне выбора возьмите <b>«Весь экран»</b> и включите галочку
+      <b>«Также передавать системный звук»</b> (внизу окна).</li>
+  </ol>
+  <button id="sysBtn">Проверить системный звук</button>
+  <div class="meter"><i id="sysBar"></i></div>
+  <div class="verdict" id="sysOut">—</div>
+</div>
+
+<div class="card">
+  <b>2. Микрофон (ваш голос)</b>
+  <p class="hint">Просто разрешите доступ к микрофону, когда браузер спросит, и говорите.</p>
+  <button id="micBtn">Проверить микрофон</button>
+  <div class="meter"><i id="micBar"></i></div>
+  <div class="verdict" id="micOut">—</div>
+</div>
+
+<p class="hint" id="ctx"></p>
+
+<script>
+function levelLoop(track, bar) {
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const src = ctx.createMediaStreamSource(new MediaStream([track]));
+  const an = ctx.createAnalyser();
+  an.fftSize = 512;
+  src.connect(an);
+  const buf = new Uint8Array(an.fftSize);
+  (function tick() {
+    an.getByteTimeDomainData(buf);
+    let peak = 0;
+    for (const v of buf) peak = Math.max(peak, Math.abs(v - 128));
+    bar.style.width = Math.min(100, Math.round((peak / 128) * 140)) + "%";
+    if (track.readyState === "live") requestAnimationFrame(tick);
+  })();
+}
+
+function noApi(out) {
+  out.className = "verdict bad";
+  out.textContent = "НЕТ: браузер не дал доступ к API захвата (navigator.mediaDevices отсутствует). " +
+    "Обычно это небезопасный контекст (нужен https) или блокировка политикой.";
+}
+
+document.getElementById("sysBtn").onclick = async () => {
+  const out = document.getElementById("sysOut");
+  const bar = document.getElementById("sysBar");
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) return noApi(out);
+  out.className = "verdict"; out.textContent = "Открываю выбор экрана…";
+  try {
+    const s = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+    const a = s.getAudioTracks();
+    s.getVideoTracks().forEach(t => t.stop()); // картинка не нужна
+    if (!a.length) {
+      out.className = "verdict bad";
+      out.textContent = "ЧАСТИЧНО: экран захватился, но звука нет — вы не включили «Также передавать системный звук». Повторите и поставьте галочку.";
+      return;
+    }
+    out.className = "verdict ok";
+    out.textContent = "ДА: системный звук захватывается. Полоска ниже должна двигаться под звук собеседника.";
+    levelLoop(a[0], bar);
+  } catch (e) {
+    out.className = "verdict bad";
+    out.textContent = "НЕТ: " + e.name + " — " + e.message +
+      (e.name === "NotAllowedError" ? " (отказ пользователя или блокировка политикой)" : "");
+  }
+};
+
+document.getElementById("micBtn").onclick = async () => {
+  const out = document.getElementById("micOut");
+  const bar = document.getElementById("micBar");
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return noApi(out);
+  out.className = "verdict"; out.textContent = "Запрашиваю микрофон…";
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+    out.className = "verdict ok";
+    out.textContent = "ДА: микрофон доступен. Говорите — полоска должна двигаться.";
+    levelLoop(s.getAudioTracks()[0], bar);
+  } catch (e) {
+    out.className = "verdict bad";
+    out.textContent = "НЕТ: " + e.name + " — " + e.message;
+  }
+};
+
+document.getElementById("ctx").textContent =
+  "Контекст страницы: " + location.origin +
+  " · защищённый контекст: " + (window.isSecureContext ? "да" : "НЕТ (захват будет заблокирован)");
+</script>
+</body>
+</html>
