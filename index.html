@@ -51,11 +51,9 @@
 <!-- ЭКРАН ВХОДА -->
 <section id="lock">
   <h1>Audio Assist</h1>
-  <p class="sub">Введите ключ для доступа.</p>
-  <label>Адрес приёма</label>
-  <input id="lk-url" placeholder="https://…" autocomplete="off" autocapitalize="off" spellcheck="false">
-  <label>Ключ</label>
-  <input id="lk-token" type="password" placeholder="ключ" autocomplete="off">
+  <p class="sub">Введите пароль.</p>
+  <label>Пароль</label>
+  <input id="lk-token" type="password" placeholder="пароль" autocomplete="off" autocapitalize="off">
   <div class="check"><input type="checkbox" id="lk-remember"><label for="lk-remember" style="margin:0;color:inherit">Запомнить на этом устройстве (быстрый вход)</label></div>
   <p class="status" id="lk-status"></p>
   <button class="primary" id="lk-go">Войти</button>
@@ -102,45 +100,44 @@
 <script>
 const $ = id => document.getElementById(id);
 const LS = { url:"aa_url", token:"aa_token", title:"aa_title" };
+const DEFAULT_URL = "https://kindle-clay-prevalent.ngrok-free.dev";  // вшитый адрес приёма; меняется под ⚙
 const SR = 16000, CHUNK_MS = 3000, MAX_RETRY = 3;
 
 let token = "", recording = false, session = null, pumps = [], t0 = 0, timerIv = null, lastSeq = 0;
-const base = () => (localStorage.getItem(LS.url) || "").trim().replace(/\/+$/, "");
+const base = () => ((localStorage.getItem(LS.url) || DEFAULT_URL).trim().replace(/\/+$/, ""));
 const log = m => { const l=$("log"); if(!l) return; l.textContent += m + "\n"; l.scrollTop = l.scrollHeight; };
 
 /* ---------- вход ---------- */
-$("lk-url").value = localStorage.getItem(LS.url) || "";
-async function tryUnlock(url, tok, remember) {
-  localStorage.setItem(LS.url, url);
-  const r = await fetch(`${url.replace(/\/+$/,"")}/auth?token=${encodeURIComponent(tok)}`, { method:"GET" });
+async function tryUnlock(tok, remember) {
+  const r = await fetch(`${base()}/auth?token=${encodeURIComponent(tok)}`, { method:"GET", headers:{ "ngrok-skip-browser-warning":"1" } });
   if (r.status === 200) {
     token = tok;
     if (remember) localStorage.setItem(LS.token, tok); else localStorage.removeItem(LS.token);
     openMain();
     return true;
   }
-  if (r.status === 401) throw new Error("Неверный ключ");
+  if (r.status === 401) throw new Error("Неверный пароль");
   throw new Error("Приёмник ответил " + r.status);
 }
 $("lk-go").onclick = async () => {
   const s = $("lk-status"); s.className="status"; s.textContent="Проверяю…";
-  const url = $("lk-url").value.trim(), tok = $("lk-token").value.trim();
-  if (!url || !tok) { s.className="status bad"; s.textContent="Заполните адрес и ключ."; return; }
-  try { await tryUnlock(url, tok, $("lk-remember").checked); }
-  catch (e) { s.className="status bad"; s.textContent = /Failed|fetch|network/i.test(e.message) ? "Приёмник недоступен — проверьте адрес." : e.message; }
+  const tok = $("lk-token").value.trim();
+  if (!tok) { s.className="status bad"; s.textContent="Введите пароль."; return; }
+  try { await tryUnlock(tok, $("lk-remember").checked); }
+  catch (e) { s.className="status bad"; s.textContent = /Failed|fetch|network/i.test(e.message) ? "Приёмник недоступен." : e.message; }
 };
 $("lk-token").addEventListener("keydown", e => { if (e.key==="Enter") $("lk-go").click(); });
 
-// быстрый вход, если ключ запомнен
+// быстрый вход, если пароль запомнен
 (async () => {
-  const url = localStorage.getItem(LS.url), tok = localStorage.getItem(LS.token);
-  if (url && tok) { try { await tryUnlock(url, tok, true); } catch {} }
+  const tok = localStorage.getItem(LS.token);
+  if (tok) { try { await tryUnlock(tok, true); } catch {} }
 })();
 
 /* ---------- экран записи ---------- */
 function openMain() {
   $("lock").classList.add("hidden"); $("main").classList.remove("hidden");
-  $("st-url").value = localStorage.getItem(LS.url) || "";
+  $("st-url").value = localStorage.getItem(LS.url) || DEFAULT_URL;
   $("st-title").value = localStorage.getItem(LS.title) || "";
   setConn(null, "готов");
   $("hint").textContent = "Нажмите «Запись» и выберите вкладку созвона (звук включится сам) либо весь экран с галочкой «Также передавать системный звук».";
