@@ -3,157 +3,256 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Передатчик звука в Shemu</title>
+<title>Audio Assist</title>
 <style>
-  :root { color-scheme: light dark; }
-  body { font: 16px/1.5 system-ui, sans-serif; max-width: 760px; margin: 0 auto; padding: 24px; }
-  h1 { font-size: 20px; }
-  .card { border: 1px solid #8884; border-radius: 10px; padding: 16px; margin: 16px 0; }
-  label { display: block; font-size: 14px; margin: 8px 0 2px; }
-  input { font: inherit; width: 100%; box-sizing: border-box; padding: 8px; border-radius: 8px; border: 1px solid #8886; }
-  button { font: inherit; padding: 10px 18px; border-radius: 8px; border: 1px solid #8886; cursor: pointer; margin-top: 12px; }
-  button:disabled { opacity: .5; cursor: default; }
-  .meter { height: 14px; border-radius: 7px; background: #8882; overflow: hidden; margin-top: 6px; }
-  .meter > i { display: block; height: 100%; width: 0%; background: #2a8; transition: width .06s linear; }
-  .row { display: flex; gap: 16px; }
-  .row > div { flex: 1; }
-  .verdict { font-weight: 600; margin-top: 10px; }
-  .ok { color: #1a8f4a; } .bad { color: #c23; }
-  .hint { color: #8889; font-size: 14px; }
-  #log { white-space: pre-wrap; font: 13px/1.4 ui-monospace, monospace; background: #8881; padding: 10px; border-radius: 8px; max-height: 200px; overflow: auto; margin-top: 10px; }
+  :root { color-scheme: light dark; --fg:#1c1c1e; --mut:#8a8a8e; --line:#8884; --ok:#1a8f4a; --bad:#d13; --accent:#2a7; }
+  * { box-sizing: border-box; }
+  body { font: 16px/1.5 system-ui, -apple-system, sans-serif; max-width: 440px; margin: 0 auto; padding: 20px; }
+  h1 { font-size: 17px; font-weight: 600; margin: 0 0 4px; }
+  .sub { color: var(--mut); font-size: 13px; margin: 0 0 20px; }
+  label { display:block; font-size:13px; color:var(--mut); margin: 10px 0 3px; }
+  input { font: inherit; width:100%; padding:11px; border-radius:10px; border:1px solid var(--line); background:transparent; color:inherit; }
+  button { font: inherit; border:none; border-radius:12px; cursor:pointer; }
+  .primary { width:100%; padding:13px; background:var(--accent); color:#fff; font-weight:600; font-size:16px; }
+  .ghost { background:transparent; color:var(--mut); border:1px solid var(--line); padding:9px 14px; }
+  .hidden { display:none !important; }
+  .check { display:flex; align-items:center; gap:8px; color:var(--mut); font-size:13px; margin-top:12px; }
+  .check input { width:auto; }
+  .status { font-size:13px; margin-top:12px; min-height:1.2em; }
+  .status.ok { color:var(--ok); } .status.bad { color:var(--bad); }
+
+  /* main */
+  .reccol { text-align:center; padding:8px 0; }
+  .recbtn { width:168px; height:168px; border-radius:50%; margin:14px auto; background:var(--accent); color:#fff;
+            display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; font-size:17px; font-weight:600;
+            transition:background .15s, transform .1s; }
+  .recbtn:active { transform:scale(.97); }
+  .recbtn.on { background:var(--bad); animation:pulse 1.6s infinite; }
+  .recbtn .ic { font-size:38px; line-height:1; }
+  @keyframes pulse { 0%,100%{box-shadow:0 0 0 0 rgba(209,51,34,.45)} 50%{box-shadow:0 0 0 16px rgba(209,51,34,0)} }
+  .timer { font-size:30px; font-variant-numeric:tabular-nums; font-weight:600; margin:4px 0; }
+  .meta { color:var(--mut); font-size:13px; }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--mut); margin-right:5px; vertical-align:middle; }
+  .dot.ok{background:var(--ok)} .dot.bad{background:var(--bad)}
+  .bars { display:flex; gap:12px; margin:14px 0 4px; }
+  .bars > div { flex:1; }
+  .bars .cap { font-size:11px; color:var(--mut); margin-bottom:4px; }
+  .meter { height:8px; border-radius:4px; background:var(--line); overflow:hidden; }
+  .meter > i { display:block; height:100%; width:0%; background:var(--accent); transition:width .07s linear; }
+  .toprow { display:flex; justify-content:space-between; align-items:center; }
+  .gear { background:transparent; color:var(--mut); font-size:20px; padding:4px 8px; }
+  details { margin-top:16px; } summary { color:var(--mut); font-size:13px; cursor:pointer; }
+  #log { white-space:pre-wrap; font:12px/1.4 ui-monospace,monospace; color:var(--mut); max-height:140px; overflow:auto; margin-top:8px; }
+  .hint { color:var(--mut); font-size:12.5px; margin-top:10px; }
 </style>
 </head>
 <body>
-<h1>Передатчик звука в Shemu</h1>
-<p class="hint">
-  Ловит ваш микрофон и системный звук (голос собеседника) в Chrome и передаёт их на Mac по защищённому адресу.
-  На этом ноутбуке <b>ничего не сохраняется</b> — звук уходит потоком и в памяти вкладки держится лишь доля секунды.
-  Работает только в <b>Chrome</b> (у Firefox нет передачи системного звука).
-</p>
 
-<div class="card">
-  <label>Адрес приёма (его даст Mac — вида https://…trycloudflare.com)</label>
-  <input id="url" placeholder="https://xxxx.trycloudflare.com" autocomplete="off">
+<!-- ЭКРАН ВХОДА -->
+<section id="lock">
+  <h1>Audio Assist</h1>
+  <p class="sub">Введите ключ для доступа.</p>
+  <label>Адрес приёма</label>
+  <input id="lk-url" placeholder="https://…" autocomplete="off" autocapitalize="off" spellcheck="false">
   <label>Ключ</label>
-  <input id="token" placeholder="ключ с Mac" autocomplete="off">
-  <label>Название встречи (необязательно)</label>
-  <input id="title" placeholder="например: созвон с поставщиком" autocomplete="off">
-</div>
+  <input id="lk-token" type="password" placeholder="ключ" autocomplete="off">
+  <div class="check"><input type="checkbox" id="lk-remember"><label for="lk-remember" style="margin:0;color:inherit">Запомнить на этом устройстве (быстрый вход)</label></div>
+  <p class="status" id="lk-status"></p>
+  <button class="primary" id="lk-go">Войти</button>
+</section>
 
-<div class="card">
-  <button id="startBtn">Начать запись</button>
-  <button id="stopBtn" disabled>Остановить и отправить</button>
-  <div class="verdict" id="out">Готов.</div>
-  <div class="row" style="margin-top:12px">
-    <div><div class="hint">Ваш микрофон</div><div class="meter"><i id="micBar"></i></div></div>
-    <div><div class="hint">Системный звук (собеседник)</div><div class="meter"><i id="sysBar"></i></div></div>
+<!-- ЭКРАН ЗАПИСИ -->
+<section id="main" class="hidden">
+  <div class="toprow">
+    <div><span class="dot" id="conn"></span><span class="meta" id="connt">готов</span></div>
+    <button class="gear" id="gear" title="Настройки">⚙</button>
   </div>
-  <div id="log"></div>
-</div>
 
-<p class="hint" id="ctx"></p>
+  <div class="reccol">
+    <button class="recbtn" id="rec"><span class="ic" id="recic">●</span><span id="reclbl">Запись</span></button>
+    <div class="timer hidden" id="timer">00:00</div>
+    <div class="meta hidden" id="delivered"></div>
+  </div>
+
+  <div class="bars hidden" id="bars">
+    <div><div class="cap">Ваш голос</div><div class="meter"><i id="micBar"></i></div></div>
+    <div><div class="cap">Собеседник</div><div class="meter"><i id="sysBar"></i></div></div>
+  </div>
+
+  <p class="hint" id="hint"></p>
+
+  <!-- Настройки -->
+  <section id="settings" class="hidden">
+    <label>Адрес приёма</label>
+    <input id="st-url" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <label>Название встречи (необязательно)</label>
+    <input id="st-title" placeholder="напр. созвон с поставщиком" autocomplete="off">
+    <div style="display:flex;gap:10px;margin-top:14px">
+      <button class="ghost" id="st-save">Сохранить</button>
+      <button class="ghost" id="st-forget">Забыть ключ / выйти</button>
+    </div>
+  </section>
+
+  <details>
+    <summary>Журнал</summary>
+    <div id="log"></div>
+  </details>
+</section>
 
 <script>
 const $ = id => document.getElementById(id);
-for (const k of ["url", "token", "title"]) {
-  $(k).value = localStorage.getItem("tx_" + k) || "";
-  $(k).addEventListener("change", () => localStorage.setItem("tx_" + k, $(k).value.trim()));
+const LS = { url:"aa_url", token:"aa_token", title:"aa_title" };
+const SR = 16000, CHUNK_MS = 3000, MAX_RETRY = 3;
+
+let token = "", recording = false, session = null, pumps = [], t0 = 0, timerIv = null, lastSeq = 0;
+const base = () => (localStorage.getItem(LS.url) || "").trim().replace(/\/+$/, "");
+const log = m => { const l=$("log"); if(!l) return; l.textContent += m + "\n"; l.scrollTop = l.scrollHeight; };
+
+/* ---------- вход ---------- */
+$("lk-url").value = localStorage.getItem(LS.url) || "";
+async function tryUnlock(url, tok, remember) {
+  localStorage.setItem(LS.url, url);
+  const r = await fetch(`${url.replace(/\/+$/,"")}/auth?token=${encodeURIComponent(tok)}`, { method:"GET" });
+  if (r.status === 200) {
+    token = tok;
+    if (remember) localStorage.setItem(LS.token, tok); else localStorage.removeItem(LS.token);
+    openMain();
+    return true;
+  }
+  if (r.status === 401) throw new Error("Неверный ключ");
+  throw new Error("Приёмник ответил " + r.status);
 }
-const log = m => { const l = $("log"); l.textContent += m + "\n"; l.scrollTop = l.scrollHeight; };
+$("lk-go").onclick = async () => {
+  const s = $("lk-status"); s.className="status"; s.textContent="Проверяю…";
+  const url = $("lk-url").value.trim(), tok = $("lk-token").value.trim();
+  if (!url || !tok) { s.className="status bad"; s.textContent="Заполните адрес и ключ."; return; }
+  try { await tryUnlock(url, tok, $("lk-remember").checked); }
+  catch (e) { s.className="status bad"; s.textContent = /Failed|fetch|network/i.test(e.message) ? "Приёмник недоступен — проверьте адрес." : e.message; }
+};
+$("lk-token").addEventListener("keydown", e => { if (e.key==="Enter") $("lk-go").click(); });
 
-const SR = 16000, CHUNK_MS = 3000;
-let running = false, session = null, pumps = [];
+// быстрый вход, если ключ запомнен
+(async () => {
+  const url = localStorage.getItem(LS.url), tok = localStorage.getItem(LS.token);
+  if (url && tok) { try { await tryUnlock(url, tok, true); } catch {} }
+})();
 
+/* ---------- экран записи ---------- */
+function openMain() {
+  $("lock").classList.add("hidden"); $("main").classList.remove("hidden");
+  $("st-url").value = localStorage.getItem(LS.url) || "";
+  $("st-title").value = localStorage.getItem(LS.title) || "";
+  setConn(null, "готов");
+  $("hint").textContent = "Нажмите «Запись» и выберите вкладку созвона (звук включится сам) либо весь экран с галочкой «Также передавать системный звук».";
+}
+function setConn(state, text) {
+  $("conn").className = "dot" + (state===true?" ok":state===false?" bad":"");
+  $("connt").textContent = text;
+}
+$("gear").onclick = () => $("settings").classList.toggle("hidden");
+$("st-save").onclick = () => {
+  localStorage.setItem(LS.url, $("st-url").value.trim());
+  localStorage.setItem(LS.title, $("st-title").value.trim());
+  $("settings").classList.add("hidden"); setConn(null, "сохранено");
+};
+$("st-forget").onclick = () => { localStorage.removeItem(LS.token); location.reload(); };
+
+/* уровни */
 function meter(track, bar) {
-  const ctx = new AudioContext();
-  const an = ctx.createAnalyser(); an.fftSize = 512;
+  const ctx = new AudioContext(); const an = ctx.createAnalyser(); an.fftSize = 512;
   ctx.createMediaStreamSource(new MediaStream([track])).connect(an);
   const buf = new Uint8Array(an.fftSize);
-  (function tick() {
-    an.getByteTimeDomainData(buf);
-    let p = 0; for (const v of buf) p = Math.max(p, Math.abs(v - 128));
-    bar.style.width = Math.min(100, Math.round(p / 128 * 140)) + "%";
-    if (track.readyState === "live" && running) requestAnimationFrame(tick); else bar.style.width = "0%";
-  })();
+  (function tick(){ an.getByteTimeDomainData(buf); let p=0; for(const v of buf)p=Math.max(p,Math.abs(v-128));
+    bar.style.width = Math.min(100, Math.round(p/128*140))+"%";
+    if (track.readyState==="live" && recording) requestAnimationFrame(tick); else bar.style.width="0%"; })();
 }
 
-// One PCM pump: resamples a track to 16 kHz mono Int16 and POSTs ~1 s chunks.
-function startPump(stream, track, label) {
+/* PCM-насос: дорожка → 16 кГц Int16 → чанки ~CHUNK_MS */
+function startPump(stream, label) {
   const ctx = new AudioContext({ sampleRate: SR });
   const src = ctx.createMediaStreamSource(stream);
   const node = ctx.createScriptProcessor(4096, 1, 1);
-  const sink = ctx.createGain(); sink.gain.value = 0;       // no audible playback
+  const sink = ctx.createGain(); sink.gain.value = 0;
   src.connect(node); node.connect(sink); sink.connect(ctx.destination);
-  let acc = [], accLen = 0, seq = 0;
-  const need = Math.round(SR * CHUNK_MS / 1000);
+  let acc = [], accLen = 0, seq = 0; const need = Math.round(SR*CHUNK_MS/1000);
   node.onaudioprocess = e => {
-    if (!running) return;
-    const f = e.inputBuffer.getChannelData(0);
-    const i16 = new Int16Array(f.length);
-    for (let i = 0; i < f.length; i++) { let s = Math.max(-1, Math.min(1, f[i])); i16[i] = s < 0 ? s * 32768 : s * 32767; }
+    if (!recording) return;
+    const f = e.inputBuffer.getChannelData(0); const i16 = new Int16Array(f.length);
+    for (let i=0;i<f.length;i++){ let s=Math.max(-1,Math.min(1,f[i])); i16[i]= s<0? s*32768 : s*32767; }
     acc.push(i16); accLen += i16.length;
     while (accLen >= need) {
-      const out = new Int16Array(need); let o = 0;
-      while (o < need) { const h = acc[0]; const take = Math.min(h.length, need - o); out.set(h.subarray(0, take), o); o += take; if (take === h.length) acc.shift(); else acc[0] = h.subarray(take); }
-      accLen -= need;
-      send(label, seq++, out.buffer);
+      const out = new Int16Array(need); let o=0;
+      while (o<need){ const h=acc[0]; const take=Math.min(h.length,need-o); out.set(h.subarray(0,take),o); o+=take; if(take===h.length)acc.shift(); else acc[0]=h.subarray(take); }
+      accLen -= need; send(label, seq++, out.buffer);
     }
   };
-  return { ctx, track, label };
+  return { ctx };
 }
 
 let q = Promise.resolve();
 function send(track, seq, buf) {
   q = q.then(async () => {
-    try {
-      const r = await fetch(`${base()}/chunk?session=${session}&track=${track}&seq=${seq}&token=${encodeURIComponent($("token").value.trim())}`, {
-        method: "POST", headers: { "Content-Type": "text/plain" }, body: buf   // простой запрос: без CORS-предзапроса
-      });
-      if (!r.ok) log(`✗ ${track} #${seq}: HTTP ${r.status}`);
-      else if (seq % 10 === 0) log(`✓ ${track}: отправлено ${seq + 1} с`);
-    } catch (e) { log(`✗ ${track} #${seq}: ${e.message}`); }
+    for (let attempt=1; attempt<=MAX_RETRY; attempt++) {
+      try {
+        const r = await fetch(`${base()}/chunk?session=${session}&track=${track}&seq=${seq}&token=${encodeURIComponent(token)}`,
+                              { method:"POST", headers:{ "Content-Type":"text/plain" }, body: buf });
+        if (r.ok) { if (track==="mic"){ lastSeq=Math.max(lastSeq,seq); updateDelivered(); } setConn(true,"идёт передача"); return; }
+        throw new Error("HTTP "+r.status);
+      } catch (e) {
+        if (attempt===MAX_RETRY) { setConn(false,"сбой связи — повтор не удался"); log(`✗ ${track}#${seq}: ${e.message}`); }
+        else await new Promise(r=>setTimeout(r, 400*attempt));
+      }
+    }
   });
 }
-const base = () => $("url").value.trim().replace(/\/+$/, "");
+function updateDelivered(){ $("delivered").textContent = "доставлено " + ((lastSeq+1)*CHUNK_MS/1000|0) + " c"; }
+function fmt(s){ const m=(s/60|0).toString().padStart(2,"0"), x=(s%60).toString().padStart(2,"0"); return m+":"+x; }
 
-$("startBtn").onclick = async () => {
-  const out = $("out");
-  if (!base() || !$("token").value.trim()) { out.className = "verdict bad"; out.textContent = "Заполните адрес и ключ."; return; }
-  if (!navigator.mediaDevices?.getDisplayMedia) { out.className = "verdict bad"; out.textContent = "Нет API захвата (нужен https / Chrome)."; return; }
+/* старт / стоп */
+$("rec").onclick = () => recording ? stop() : start();
+document.addEventListener("keydown", e => { if (e.code==="Space" && !$("main").classList.contains("hidden") && e.target.tagName!=="INPUT"){ e.preventDefault(); $("rec").click(); }});
+
+async function start() {
+  if (!base()) { setConn(false,"нет адреса — откройте ⚙"); return; }
+  if (!navigator.mediaDevices?.getDisplayMedia) { setConn(false,"нужен Chrome / https"); return; }
+  let mic, disp;
   try {
-    const mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false } });
-    out.textContent = "Выберите «Весь экран» и включите «Также передавать системный звук»…";
-    const disp = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-    disp.getVideoTracks().forEach(t => t.stop());
-    const sysTracks = disp.getAudioTracks();
-    if (!sysTracks.length) { out.className = "verdict bad"; out.textContent = "Системный звук не передан — не стояла галочка. Нажмите «Начать» заново."; mic.getTracks().forEach(t => t.stop()); return; }
-    session = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-    running = true;
-    pumps = [startPump(mic, mic.getAudioTracks()[0], "mic"), startPump(new MediaStream([sysTracks[0]]), sysTracks[0], "sys")];
-    meter(mic.getAudioTracks()[0], $("micBar")); meter(sysTracks[0], $("sysBar"));
-    sysTracks[0].onended = () => { if (running) stop(); };   // остановка «Прекратить доступ»
-    out.className = "verdict ok"; out.textContent = "Идёт запись и передача. Говорите.";
-    log("сессия " + session + " начата");
-    $("startBtn").disabled = true; $("stopBtn").disabled = false;
-  } catch (e) { out.className = "verdict bad"; out.textContent = "Ошибка: " + e.name + " — " + e.message; }
-};
+    mic = await navigator.mediaDevices.getUserMedia({ audio:{ echoCancellation:false, noiseSuppression:false, autoGainControl:false } });
+    setConn(null,"выберите экран со звуком…");
+    disp = await navigator.mediaDevices.getDisplayMedia({ video:{ frameRate:1 }, audio:true, systemAudio:"include", selfBrowserSurface:"exclude", surfaceSwitching:"exclude" });
+  } catch (e) { mic?.getTracks().forEach(t=>t.stop()); setConn(false, e.name==="NotAllowedError"?"доступ не выдан":e.message); return; }
+  disp.getVideoTracks().forEach(t=>t.stop());
+  const sys = disp.getAudioTracks();
+  if (!sys.length) { mic.getTracks().forEach(t=>t.stop()); setConn(false,"нет системного звука — нужна галочка/вкладка со звуком"); $("hint").textContent="Системный звук не передан. Нажмите «Запись» снова и выберите вкладку созвона ИЛИ весь экран с галочкой «Также передавать системный звук»."; return; }
+
+  session = Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+  recording = true; lastSeq = -1; q = Promise.resolve();
+  pumps = [startPump(mic, "mic"), startPump(new MediaStream([sys[0]]), "sys")];
+  meter(mic.getAudioTracks()[0], $("micBar")); meter(sys[0], $("sysBar"));
+  sys[0].onended = () => { if (recording) stop(); };
+  pumps._tracks = [mic.getAudioTracks()[0], sys[0]];
+
+  $("rec").classList.add("on"); $("recic").textContent="■"; $("reclbl").textContent="Стоп";
+  $("timer").classList.remove("hidden"); $("delivered").classList.remove("hidden"); $("bars").classList.remove("hidden");
+  $("hint").textContent=""; setConn(true,"идёт запись");
+  t0 = Date.now(); $("timer").textContent="00:00";
+  timerIv = setInterval(()=> $("timer").textContent = fmt((Date.now()-t0)/1000|0), 500);
+  log("сессия "+session+" — старт");
+}
 
 async function stop() {
-  running = false;
-  $("stopBtn").disabled = true;
-  for (const p of pumps) { try { p.track.stop(); p.ctx.close(); } catch {} }
+  recording = false; clearInterval(timerIv);
+  $("rec").classList.remove("on"); $("recic").textContent="●"; $("reclbl").textContent="Запись";
+  (pumps._tracks||[]).forEach(t=>{try{t.stop()}catch{}}); pumps.forEach(p=>{try{p.ctx.close()}catch{}});
+  setConn(null,"отправляю хвост…");
   await q;
-  const meta = { startedUtc: new Date().toISOString(), utcOffsetMin: -new Date().getTimezoneOffset(), title: $("title").value.trim() };
+  const meta = { startedUtc:new Date(t0).toISOString(), utcOffsetMin:-new Date().getTimezoneOffset(), title:(localStorage.getItem(LS.title)||"").trim() };
   try {
-    await fetch(`${base()}/finish?session=${session}&token=${encodeURIComponent($("token").value.trim())}`, { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(meta) });
-    $("out").className = "verdict ok"; $("out").textContent = "Отправлено. Встреча появится в Shemu на Mac.";
-    log("сессия завершена");
-  } catch (e) { $("out").className = "verdict bad"; $("out").textContent = "Финал не доставлен: " + e.message; }
-  $("startBtn").disabled = false;
+    await fetch(`${base()}/finish?session=${session}&token=${encodeURIComponent(token)}`, { method:"POST", headers:{ "Content-Type":"text/plain" }, body: JSON.stringify(meta) });
+    setConn(true,"готово — встреча уйдёт в библиотеку"); log("сессия завершена и отправлена");
+  } catch (e) { setConn(false,"финал не доставлен: "+e.message); }
+  $("timer").classList.add("hidden"); $("delivered").classList.add("hidden"); $("bars").classList.add("hidden");
 }
-$("stopBtn").onclick = stop;
-
-$("ctx").textContent = "Контекст: " + location.origin + " · защищённый: " + (window.isSecureContext ? "да" : "НЕТ");
 </script>
 </body>
 </html>
