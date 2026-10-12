@@ -61,7 +61,7 @@ for (const k of ["url", "token", "title"]) {
 }
 const log = m => { const l = $("log"); l.textContent += m + "\n"; l.scrollTop = l.scrollHeight; };
 
-const SR = 16000, CHUNK_MS = 1000;
+const SR = 16000, CHUNK_MS = 3000;
 let running = false, session = null, pumps = [];
 
 function meter(track, bar) {
@@ -107,7 +107,7 @@ function send(track, seq, buf) {
   q = q.then(async () => {
     try {
       const r = await fetch(`${base()}/chunk?session=${session}&track=${track}&seq=${seq}&token=${encodeURIComponent($("token").value.trim())}`, {
-        method: "POST", headers: { "Content-Type": "text/plain", "bypass-tunnel-reminder": "1" }, body: buf
+        method: "POST", headers: { "Content-Type": "text/plain" }, body: buf   // простой запрос: без CORS-предзапроса
       });
       if (!r.ok) log(`✗ ${track} #${seq}: HTTP ${r.status}`);
       else if (seq % 10 === 0) log(`✓ ${track}: отправлено ${seq + 1} с`);
@@ -145,7 +145,7 @@ async function stop() {
   await q;
   const meta = { startedUtc: new Date().toISOString(), utcOffsetMin: -new Date().getTimezoneOffset(), title: $("title").value.trim() };
   try {
-    await fetch(`${base()}/finish?session=${session}&token=${encodeURIComponent($("token").value.trim())}`, { method: "POST", headers: { "Content-Type": "text/plain", "bypass-tunnel-reminder": "1" }, body: JSON.stringify(meta) });
+    await fetch(`${base()}/finish?session=${session}&token=${encodeURIComponent($("token").value.trim())}`, { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(meta) });
     $("out").className = "verdict ok"; $("out").textContent = "Отправлено. Встреча появится в Shemu на Mac.";
     log("сессия завершена");
   } catch (e) { $("out").className = "verdict bad"; $("out").textContent = "Финал не доставлен: " + e.message; }
