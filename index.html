@@ -78,6 +78,7 @@
   </div>
 
   <p class="hint" id="hint"></p>
+  <button class="ghost hidden" id="refinish">Отправить финал ещё раз</button>
 
   <!-- Настройки -->
   <section id="settings" class="hidden">
@@ -223,7 +224,11 @@ async function start() {
   if (!sys.length) { mic.getTracks().forEach(t=>t.stop()); setConn(false,"нет системного звука — нужна галочка/вкладка со звуком"); $("hint").textContent="Системный звук не передан. Нажмите «Запись» снова и выберите вкладку созвона ИЛИ весь экран с галочкой «Также передавать системный звук»."; return; }
 
   session = Date.now().toString(36)+Math.random().toString(36).slice(2,6);
-  recording = true; lastSeq = -1; q = Promise.resolve();
+  recording = true; lastSeq = -1; q = Promise.resolve(); t0 = Date.now();
+  $("refinish").classList.add("hidden");
+  // сведения о встрече — сразу, первым в очереди: финал больше не обязан их довезти
+  const meta = meetingMeta(), sid = session;
+  q = q.then(() => post(`/start?session=${sid}`, JSON.stringify(meta), 3).catch(e => log("✗ start: "+e.message)));
   pumps = [startPump(mic, "mic"), startPump(new MediaStream([sys[0]]), "sys")];
   meter(mic.getAudioTracks()[0], $("micBar")); meter(sys[0], $("sysBar"));
   sys[0].onended = () => { if (recording) stop(); };
@@ -232,7 +237,7 @@ async function start() {
   $("rec").classList.add("on"); $("recic").textContent="■"; $("reclbl").textContent="Стоп";
   $("timer").classList.remove("hidden"); $("delivered").classList.remove("hidden"); $("bars").classList.remove("hidden");
   $("hint").textContent=""; setConn(true,"идёт запись");
-  t0 = Date.now(); $("timer").textContent="00:00";
+  $("timer").textContent="00:00";
   timerIv = setInterval(()=> $("timer").textContent = fmt((Date.now()-t0)/1000|0), 500);
   log("сессия "+session+" — старт");
 }
@@ -243,12 +248,45 @@ async function stop() {
   (pumps._tracks||[]).forEach(t=>{try{t.stop()}catch{}}); pumps.forEach(p=>{try{p.ctx.close()}catch{}});
   setConn(null,"отправляю хвост…");
   await q;
-  const meta = { startedUtc:new Date(t0).toISOString(), utcOffsetMin:-new Date().getTimezoneOffset(), title:(localStorage.getItem(LS.title)||"").trim() };
-  try {
-    await fetch(`${base()}/finish?session=${session}&token=${encodeURIComponent(token)}`, { method:"POST", headers:{ "Content-Type":"text/plain" }, body: JSON.stringify(meta) });
-    setConn(true,"готово — встреча уйдёт в библиотеку"); log("сессия завершена и отправлена");
-  } catch (e) { setConn(false,"финал не доставлен: "+e.message); }
+  await sendFinish(session, meetingMeta());
   $("timer").classList.add("hidden"); $("delivered").classList.add("hidden"); $("bars").classList.add("hidden");
+}
+
+function meetingMeta() {
+  return { startedUtc:new Date(t0).toISOString(), utcOffsetMin:-new Date().getTimezoneOffset(), title:(localStorage.getItem(LS.title)||"").trim() };
+}
+
+/* POST с повторами; паузы растут. 401 не повторяем — пароль не тот. */
+async function post(path, body, attempts) {
+  const waits = [0, 1000, 2000, 4000, 8000, 15000, 30000];
+  let last;
+  for (let i=0; i<attempts; i++) {
+    if (waits[i]) await new Promise(r=>setTimeout(r, waits[Math.min(i, waits.length-1)]));
+    try {
+      const r = await fetch(`${base()}${path}&token=${encodeURIComponent(token)}`, { method:"POST", headers:{ "Content-Type":"text/plain" }, body });
+      if (r.ok) return r;
+      last = new Error("HTTP "+r.status);
+      if (r.status===401) break;
+    } catch (e) { last = e; }
+    if (i<attempts-1) log(`… ${path.split("?")[0]}: ${last.message}, повтор ${i+2}/${attempts}`);
+  }
+  throw last;
+}
+
+/* Финал: до 7 попыток (~1 мин). Повтор безопасен — Mac второй встречи не создаст.
+   Если не дошёл, запись не пропала: Mac сам соберёт её через 3 мин тишины. */
+async function sendFinish(sid, meta) {
+  setConn(null,"отправляю финал…");
+  try {
+    await post(`/finish?session=${sid}`, JSON.stringify(meta), 7);
+    $("refinish").classList.add("hidden");
+    setConn(true,"готово — встреча уйдёт в библиотеку"); log("сессия "+sid+" завершена и отправлена");
+  } catch (e) {
+    setConn(false,"финал не доставлен ("+e.message+") — Mac сам соберёт запись через 3 мин");
+    log("✗ finish "+sid+": "+e.message);
+    const b = $("refinish"); b.classList.remove("hidden");
+    b.onclick = () => { b.classList.add("hidden"); sendFinish(sid, meta); };
+  }
 }
 </script>
 </body>
