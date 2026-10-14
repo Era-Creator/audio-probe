@@ -274,7 +274,7 @@ async function post(path, body, attempts) {
 }
 
 /* Финал: до 7 попыток (~1 мин). Повтор безопасен — Mac второй встречи не создаст.
-   Если не дошёл, запись не пропала: Mac сам соберёт её через 3 мин тишины. */
+   Если не дошёл, запись не пропала: Mac сам соберёт её через 15 мин тишины. */
 async function sendFinish(sid, meta) {
   setConn(null,"отправляю финал…");
   try {
@@ -282,7 +282,7 @@ async function sendFinish(sid, meta) {
     $("refinish").classList.add("hidden");
     setConn(true,"готово — встреча уйдёт в библиотеку"); log("сессия "+sid+" завершена и отправлена");
   } catch (e) {
-    setConn(false,"финал не доставлен ("+e.message+") — Mac сам соберёт запись через 3 мин");
+    setConn(false,"финал не доставлен ("+e.message+") — Mac сам соберёт запись через 15 мин");
     log("✗ finish "+sid+": "+e.message);
     const b = $("refinish"); b.classList.remove("hidden");
     b.onclick = () => { b.classList.add("hidden"); sendFinish(sid, meta); };
